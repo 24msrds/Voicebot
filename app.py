@@ -1,56 +1,55 @@
 import streamlit as st
-import openai
+from openai import OpenAI
 
-# Set API Key from Streamlit Secrets
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+# Initialize OpenAI client
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # Page config
 st.set_page_config(page_title="Ragul's Voice Bot", layout="centered")
 st.title("🎤 Ragul's Interview Voice Bot")
-
 st.write("Speak any interview-type question. I will answer as **Ragul B**.")
 
-# Audio input (microphone)
+# Mic input
 audio = st.audio_input("🎙️ Ask your question:")
 
 if audio:
-    # Play the audio user recorded
     st.audio(audio)
 
-    # Convert speech → text
-    transcription = openai.Audio.transcribe(
+    # Speech → Text
+    transcription = client.audio.transcriptions.create(
         model="gpt-4o-transcribe",
-        file=audio
+        file=audio  # RAW audio file
     )
 
-    user_text = transcription["text"]
+    user_text = transcription.text
     st.write("### **You asked:**", user_text)
 
-    # Create prompt: Answer questions as Ragul B
+    # Answer as Ragul B
     prompt = f"""
     Answer the following question as if you are Ragul B.
-    Speak in first person, confident, clear, and interview-friendly.
+    Speak in first person, confidently and interview-friendly.
 
     Question: {user_text}
     """
 
-    # Generate answer text
-    response = openai.ChatCompletion.create(
+    # Chat Response (New API)
+    response = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}]
+        messages=[
+            {"role": "user", "content": prompt}
+        ]
     )
 
-    answer = response["choices"][0]["message"]["content"]
+    answer = response.choices[0].message["content"]
 
     st.write("### **My Answer:**")
     st.write(answer)
 
-    # Convert answer → audio  
-    tts_audio = openai.Audio.create(
+    # Text → Speech (New API)
+    audio_reply = client.audio.speech.create(
         model="gpt-4o-mini-speech",
         voice="alloy",
         input=answer
     )
 
-    # Play the generated voice response
-    st.audio(tts_audio, format="audio/mp3")
+    st.audio(audio_reply.read(), format="audio/mp3")
