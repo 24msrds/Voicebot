@@ -24,13 +24,13 @@ audio = st.audio_input("🎙️ Speak your interview question:")
 if audio:
     st.audio(audio)
 
-    # Save raw uploaded file using correct extension
+    # Save audio as WEBM (Streamlit format)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp:
         tmp.write(audio.read())
         audio_path = tmp.name
 
     # --------------------------
-    # STEP 1 — Deepgram Transcription (for WEBM)
+    # STEP 1 — Deepgram Transcription
     # --------------------------
     deepgram_url = "https://api.deepgram.com/v1/listen"
 
@@ -39,7 +39,7 @@ if audio:
             deepgram_url,
             headers={
                 "Authorization": f"Token {DEEPGRAM_API_KEY}",
-                "Content-Type": "audio/webm"   # IMPORTANT!!
+                "Content-Type": "audio/webm"
             },
             data=f
         )
@@ -67,17 +67,20 @@ if audio:
     Question: {user_text}
     """
 
-    # model fix → use simple valid name
-   chat_reply = groq_client.chat.completions.create(
-    model="llama3-8b-8192",
-    messages=[
-        {"role": "user", "content": prompt}
-    ]
-)
+    chat_reply = groq_client.chat.completions.create(
+        model="llama3-8b-8192",
+        messages=[
+            {"role": "user", "content": prompt}
+        ]
+    )
 
+    answer = chat_reply.choices[0].message["content"]
+
+    st.write("### **My Answer:**")
+    st.write(answer)
 
     # --------------------------
-    # STEP 3 — Deepgram TTS
+    # STEP 3 — Deepgram TTS (text → speech)
     # --------------------------
     tts_url = "https://api.deepgram.com/v1/speak?model=aura-asteria-en"
 
@@ -91,4 +94,3 @@ if audio:
     )
 
     st.audio(tts_response.content, format="audio/mp3")
-
