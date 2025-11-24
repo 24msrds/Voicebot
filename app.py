@@ -1,96 +1,62 @@
-import streamlit as st
-import requests
-import json
+# --- Debug / auth-check block (add right after reading st.secrets) ---
+import traceback
 from groq import Groq
-import tempfile
+import groq as groq_pkg   # to reference exceptions
 
-# --------------------------
-# Load API keys
-# --------------------------
+# Masked info (safe to show)
+def mask_key(k: str):
+    if not k: return "<missing>"
+    return k[:4] + "…" + k[-4:] + f" (len={len(k)})"
+
+st.write("**Debug:** checking secrets (masked):")
+st.write(f"GROQ_API_KEY = {mask_key(st.secrets.get('GROQ_API_KEY',''))}")
+st.write(f"DEEPGRAM_API_KEY = {mask_key(st.secrets.get('DEEPGRAM_API_KEY',''))}")
+
+# Quick existence check
+if "GROQ_API_KEY" not in st.secrets:
+    st.error("Missing GROQ_API_KEY in Streamlit secrets. Add it in the app settings.")
+    st.stop()
+
+# Initialize client with try/except
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-DEEPGRAM_API_KEY = st.secrets["DEEPGRAM_API_KEY"]
+try:
+    groq_client = Groq(api_key=GROQ_API_KEY)
+    st.write("Groq client created successfully.")
+except Exception as e:
+    st.error("Failed to initialize Groq client.")
+    st.exception(e)
+    st.stop()
 
-groq_client = Groq(api_key=GROQ_API_KEY)
+# Optional: run a tiny sanity call to validate auth (wrapped)
+st.write("Attempting a lightweight Groq auth test...")
 
-# --------------------------
-# Streamlit UI
-# --------------------------
-st.set_page_config(page_title="Ragul's Interview Voice Bot (FREE)", layout="centered")
-st.title("🎤 Ragul's Interview Voice Bot (FREE)")
-st.write("Ask any interview-style question. I'll answer like **Ragul B**.")
-
-audio = st.audio_input("🎙️ Speak your interview question:")
-
-if audio:
-    st.audio(audio)
-
-    # Save audio as WEBM (Streamlit format)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp:
-        tmp.write(audio.read())
-        audio_path = tmp.name
-
-    # --------------------------
-    # STEP 1 — Deepgram Transcription
-    # --------------------------
-    deepgram_url = "https://api.deepgram.com/v1/listen"
-
-    with open(audio_path, "rb") as f:
-        dg_response = requests.post(
-            deepgram_url,
-            headers={
-                "Authorization": f"Token {DEEPGRAM_API_KEY}",
-                "Content-Type": "audio/webm"
-            },
-            data=f
-        )
-
-    dg_data = dg_response.json()
-
-    # Extract transcript safely
-    try:
-        user_text = dg_data["results"]["channels"][0]["alternatives"][0]["transcript"]
-    except Exception as e:
-        st.error("❌ Deepgram could not read your audio. Try speaking clearly.")
-        st.subheader("Deepgram Debug Response:")
-        st.json(dg_data)
-        st.stop()
-
-    st.write("### **You asked:**", user_text)
-
-    # --------------------------
-    # STEP 2 — Groq Llama3 Chat Completion
-    # --------------------------
-    prompt = f"""
-    Answer the following question as if you are Ragul B.
-    Speak in first person, confident and interview-friendly.
-
-    Question: {user_text}
-    """
-
-    chat_reply = groq_client.chat.completions.create(
+try:
+    # Here we attempt a small chat call with a trivial prompt & short model to test auth.
+    # If your account doesn't have model access, this will show the response text/status.
+    test_reply = groq_client.chat.completions.create(
         model="llama3-8b-8192",
-        messages=[
-            {"role": "user", "content": prompt}
-        ]
+        messages=[{"role":"user","content":"Say hello briefly."}],
+        max_tokens=1
     )
-
-    answer = chat_reply.choices[0].message["content"]
-
-    st.write("### **My Answer:**")
-    st.write(answer)
-
-    # --------------------------
-    # STEP 3 — Deepgram TTS (text → speech)
-    # --------------------------
-    tts_url = "https://api.deepgram.com/v1/speak?model=aura-asteria-en"
-
-    tts_response = requests.post(
-        tts_url,
-        headers={
-            "Authorization": f"Token {DEEPGRAM_API_KEY}",
-            "Content-Type": "application/json"
-        },
-        data=json.dumps({"text": answer})
-    )
-
-    st.audio(tts_response.content, format="audio/mp3")
+    st.success("Test chat call succeeded — authentication OK.")
+    st.write("Test reply (truncated):")
+    st.write(str(test_reply)[:800])
+except Exception as e:
+    st.error("Groq test call failed — authentication or permissions issue.")
+    # Try to show more info about the response if available
+    try:
+        # Many SDK exceptions include a `.response` attribute with status/text
+        resp = getattr(e, "response", None)
+        if resp is not None:
+            st.write("HTTP status:", getattr(resp, "status_code", "<unknown>"))
+            # Avoid printing secrets — show only the beginning of the text body
+            text = getattr(resp, "text", "")
+            st.write("Response snippet:", text[:1000])
+        else:
+            st.write("Exception type:", type(e).__name__)
+            st.write("Exception args:", e.args)
+            st.text(traceback.format_exc())
+    except Exception:
+        st.exception(e)
+    st.stop()
+# --- end debug block ---
