@@ -80,4 +80,110 @@ except Exception as e:
         text = getattr(resp, "text", "")
         st.write("Response snippet:", text[:1000])
     else:
-        st.writ
+        st.write("Exception type:", type(e).__name__)
+        st.text(traceback.format_exc())
+    st.stop()
+
+# --------------------------
+# Main UI: accept audio input
+# --------------------------
+audio = st.audio_input("🎙️ Speak your interview question:")
+
+if audio:
+    st.audio(audio)
+
+    # Save audio as WEBM (Streamlit format)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp:
+        tmp.write(audio.read())
+        audio_path = tmp.name
+
+    # --------------------------
+    # STEP 1 — Deepgram Transcription
+    # --------------------------
+    deepgram_url = "https://api.deepgram.com/v1/listen"
+    try:
+        with open(audio_path, "rb") as f:
+            dg_response = requests.post(
+                deepgram_url,
+                headers={
+                    "Authorization": f"Token {DEEPGRAM_API_KEY}",
+                    "Content-Type": "audio/webm"
+                },
+                data=f
+            )
+        # Handle non-200 from Deepgram
+        if dg_response.status_code != 200:
+            st.error(f"Deepgram returned status {dg_response.status_code}")
+            st.write(dg_response.text[:1000])
+            st.stop()
+        dg_data = dg_response.json()
+    except Exception as e:
+        st.error("Network or Deepgram request failed.")
+        st.exception(e)
+        st.stop()
+
+    # Extract transcript safely
+    user_text = ""
+    try:
+        user_text = dg_data["results"]["channels"][0]["alternatives"][0]["transcript"]
+    except Exception:
+        st.error("❌ Deepgram could not read your audio. Try speaking clearly.")
+        st.subheader("Deepgram Debug Response:")
+        st.json(dg_data)
+        st.stop()
+
+    st.write("### **You asked:**", user_text)
+
+    # --------------------------
+    # STEP 2 — Groq Chat Completion
+    # --------------------------
+    prompt = f"""
+    Answer the following question as if you are Ragul B.
+    Speak in first person, confident and interview-friendly.
+
+    Question: {user_text}
+    """
+
+    try:
+        chat_reply = groq_client.chat.completions.create(
+            model=MODEL_ID,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=512
+        )
+        # Extract answer safely
+        answer = chat_reply.choices[0].message["content"]
+    except Exception as e:
+        st.error("Groq API error (model or permissions). See debug below.")
+        resp = getattr(e, "response", None)
+        if resp is not None:
+            st.write("HTTP status:", getattr(resp, "status_code", "<unknown>"))
+            st.write("Response snippet:", getattr(resp, "text", "")[:1200])
+        else:
+            st.exception(e)
+        st.stop()
+
+    st.write("### **My Answer:**")
+    st.write(answer)
+
+    # --------------------------
+    # STEP 3 — Deepgram TTS (text → speech)
+    # --------------------------
+    tts_url = "https://api.deepgram.com/v1/speak?model=aura-asteria-en"
+    try:
+        tts_response = requests.post(
+            tts_url,
+            headers={
+                "Authorization": f"Token {DEEPGRAM_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            data=json.dumps({"text": answer})
+        )
+        if tts_response.status_code == 200:
+            st.audio(tts_response.content, format="audio/mp3")
+        else:
+            st.error("Deepgram TTS failed.")
+            st.write(tts_response.status_code)
+            st.write(tts_response.text[:1000])
+    except Exception as e:
+        st.error("Deepgram TTS request failed.")
+        st.exception(e)
