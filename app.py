@@ -68,15 +68,13 @@ if audio:
     """
 
     # model fix → use simple valid name
-    chat_reply = groq_client.chat.completions.create(
-        model="llama3-8b",
-        messages=[{"role": "user", "content": prompt}]
-    )
+   chat_reply = groq_client.chat.completions.create(
+    model="llama3-8b-8192",
+    messages=[
+        {"role": "user", "content": prompt}
+    ]
+)
 
-    answer = chat_reply.choices[0].message["content"]
-
-    st.write("### **My Answer:**")
-    st.write(answer)
 
     # --------------------------
     # STEP 3 — Deepgram TTS
@@ -93,3 +91,4 @@ if audio:
     )
 
     st.audio(tts_response.content, format="audio/mp3")
+
