@@ -151,7 +151,7 @@ if audio:
             max_tokens=512
         )
         # Extract answer safely
-        answer = chat_reply.choices[0].message["content"]
+        answer = chat_reply.choices[0].message.content
     except Exception as e:
         st.error("Groq API error (model or permissions). See debug below.")
         resp = getattr(e, "response", None)
