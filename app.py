@@ -187,3 +187,4 @@ if audio:
     except Exception as e:
         st.error("Deepgram TTS request failed.")
         st.exception(e)
+
