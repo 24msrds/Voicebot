@@ -1,4 +1,4 @@
-# app.py — Rahul AI (Duplicate-safe GPT-style assistant)
+# app.py — Rahul AI (Clean version without symbols)
 
 import streamlit as st
 import requests
@@ -18,7 +18,7 @@ except Exception:
 # UI CONFIG
 # --------------------------
 st.set_page_config(page_title="Rahul AI", layout="centered")
-st.title(" Rahul AI")
+st.title("Rahul AI")
 st.write(
     "Ask any technical question. I can help with AI, ML, DL, NLP, "
     "Data Science, Algorithms, and Programming."
@@ -29,9 +29,6 @@ st.write(
 # --------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
-
-if "last_input" not in st.session_state:
-    st.session_state.last_input = None
 
 # --------------------------
 # SECRETS CHECK
@@ -48,13 +45,13 @@ MODEL_ID = st.secrets.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 # INIT GROQ CLIENT
 # --------------------------
 if Groq is None:
-    st.error("Groq SDK not installed. Run: pip install groq")
+    st.error("Groq SDK not installed. Run pip install groq")
     st.stop()
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 # --------------------------
-# SYSTEM PROMPT (CORE BRAIN)
+# SYSTEM PROMPT
 # --------------------------
 SYSTEM_PROMPT = {
     "role": "system",
@@ -63,7 +60,7 @@ You are Rahul, a highly intelligent technical assistant.
 
 Identity:
 - Your name is Rahul.
-- If asked who you are, reply exactly: "My name is Rahul."
+- If asked who you are, reply exactly: My name is Rahul.
 
 Capabilities:
 - Artificial Intelligence
@@ -87,17 +84,21 @@ if not st.session_state.messages:
     st.session_state.messages.append(SYSTEM_PROMPT)
 
 # --------------------------
-# INPUT UI
+# DISPLAY CHAT HISTORY
 # --------------------------
-audio = st.audio_input("🎙️ Speak")
+for msg in st.session_state.messages:
+    if msg["role"] == "user":
+        with st.chat_message("user"):
+            st.write(msg["content"])
+    elif msg["role"] == "assistant":
+        with st.chat_message("assistant"):
+            st.write(msg["content"])
 
-with st.form(key="text_form", clear_on_submit=True):
-    text_input = st.text_input(" Or type your question")
-    submitted = st.form_submit_button("Send")
+# --------------------------
+# VOICE INPUT
+# --------------------------
+audio = st.audio_input("Speak")
 
-# --------------------------
-# DEEPGRAM STT
-# --------------------------
 def deepgram_transcribe(audio_file):
     url = "https://api.deepgram.com/v1/listen"
     headers = {
@@ -108,9 +109,6 @@ def deepgram_transcribe(audio_file):
     data = response.json()
     return data["results"]["channels"][0]["alternatives"][0]["transcript"]
 
-# --------------------------
-# GET USER INPUT (SAFE)
-# --------------------------
 user_text = None
 
 if audio:
@@ -121,29 +119,29 @@ if audio:
     with open(audio_path, "rb") as f:
         user_text = deepgram_transcribe(f)
 
-elif submitted and text_input.strip():
-    user_text = text_input.strip()
+# --------------------------
+# TEXT INPUT
+# --------------------------
+typed_text = st.chat_input("Type your question and press Enter")
 
-# --------------------------
-# DUPLICATE PREVENTION
-# --------------------------
-if not user_text or user_text == st.session_state.last_input:
+if typed_text:
+    user_text = typed_text
+
+if not user_text:
     st.stop()
 
-st.session_state.last_input = user_text
-
 # --------------------------
-# DISPLAY USER MESSAGE
+# ADD USER MESSAGE
 # --------------------------
-st.markdown("###  You")
-st.write(user_text)
-
 st.session_state.messages.append(
     {"role": "user", "content": user_text}
 )
 
+with st.chat_message("user"):
+    st.write(user_text)
+
 # --------------------------
-# GROQ COMPLETION
+# GROQ RESPONSE
 # --------------------------
 try:
     response = groq_client.chat.completions.create(
@@ -161,16 +159,15 @@ st.session_state.messages.append(
     {"role": "assistant", "content": answer}
 )
 
-# --------------------------
-# DISPLAY ANSWER
-# --------------------------
-st.markdown("###  Rahul")
-st.write(answer)
+with st.chat_message("assistant"):
+    st.write(answer)
 
 # --------------------------
-# DEEPGRAM TTS
+# DEEPGRAM TEXT TO SPEECH
 # --------------------------
-if st.checkbox(" Read aloud", value=True):
+read_aloud = st.checkbox("Read aloud", value=True)
+
+if read_aloud:
     tts_url = "https://api.deepgram.com/v1/speak?model=aura-asteria-en"
     tts_response = requests.post(
         tts_url,
@@ -182,11 +179,3 @@ if st.checkbox(" Read aloud", value=True):
     )
     if tts_response.status_code == 200:
         st.audio(tts_response.content, format="audio/mp3")
-
-# --------------------------
-# MEMORY VIEW
-# --------------------------
-with st.expander(" Conversation Memory"):
-    for msg in st.session_state.messages:
-        role = "You" if msg["role"] == "user" else "Rahul"
-        st.markdown(f"**{role}:** {msg['content']}")
