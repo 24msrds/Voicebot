@@ -1,4 +1,4 @@
-# app.py — Rahul AI Bot (General Technical AI Assistant)
+# app.py — Rahul AI (General Technical AI Assistant)
 
 import streamlit as st
 import requests
@@ -19,7 +19,7 @@ except Exception:
 # --------------------------
 st.set_page_config(page_title="Rahul AI", layout="centered")
 st.title("🤖 Rahul AI")
-st.write("Ask any technical question. I can help with AI, ML, DL, NLP, Data Science, Algorithms, and more.")
+st.write("Ask any technical question. I can help with AI, ML, DL, NLP, Data Science, Algorithms, and Programming.")
 
 # --------------------------
 # SESSION MEMORY (GPT-style)
@@ -31,7 +31,7 @@ if "messages" not in st.session_state:
 # SECRETS CHECK (SAME)
 # --------------------------
 if "GROQ_API_KEY" not in st.secrets or "DEEPGRAM_API_KEY" not in st.secrets:
-    st.error("Missing GROQ_API_KEY or DEEPGRAM_API_KEY in secrets.")
+    st.error("Missing GROQ_API_KEY or DEEPGRAM_API_KEY in Streamlit secrets.")
     st.stop()
 
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
@@ -48,16 +48,16 @@ if Groq is None:
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 # --------------------------
-# SYSTEM PROMPT (CORE INTELLIGENCE)
+# SYSTEM PROMPT (CORE BRAIN)
 # --------------------------
 SYSTEM_PROMPT = {
     "role": "system",
     "content": """
-You are Rahul, a highly intelligent technical AI assistant.
+You are Rahul, a highly intelligent technical assistant.
 
 Identity:
 - Your name is Rahul.
-- If asked who you are, always reply: "My name is Rahul."
+- If asked who you are, reply exactly: "My name is Rahul."
 
 Capabilities:
 - Artificial Intelligence
@@ -67,18 +67,19 @@ Capabilities:
 - Data Science
 - Algorithms
 - Statistics
-- Programming
+- Programming (Python, Java, C, SQL)
 
 Rules:
-- Automatically infer the domain of the question.
-- Answer clearly, step by step.
-- Use technical depth when required.
+- Automatically infer the technical domain.
+- Explain concepts step by step.
+- Use examples when helpful.
+- Be precise and professional.
 - Never mention LLaMA, Groq, or model names.
 - Never say you are an AI model by any company.
 """
 }
 
-# Ensure system prompt is first message
+# Ensure system prompt is first
 if not st.session_state.messages:
     st.session_state.messages.append(SYSTEM_PROMPT)
 
@@ -86,7 +87,10 @@ if not st.session_state.messages:
 # INPUT (VOICE + TEXT)
 # --------------------------
 audio = st.audio_input("🎙️ Speak")
-text_input = st.text_area("✍️ Or type your question")
+
+with st.form(key="text_form", clear_on_submit=True):
+    text_input = st.text_input("✍️ Or type your question")
+    submitted = st.form_submit_button("Send")
 
 # --------------------------
 # DEEPGRAM SPEECH → TEXT (SAME)
@@ -114,12 +118,15 @@ if audio:
     with open(audio_path, "rb") as f:
         user_text = deepgram_transcribe(f)
 
-elif text_input.strip():
+elif submitted and text_input.strip():
     user_text = text_input.strip()
 
 if not user_text:
     st.stop()
 
+# --------------------------
+# DISPLAY USER INPUT
+# --------------------------
 st.markdown("### 🧑 You")
 st.write(user_text)
 
@@ -150,7 +157,7 @@ st.session_state.messages.append(
 )
 
 # --------------------------
-# OUTPUT
+# DISPLAY ANSWER
 # --------------------------
 st.markdown("### 🤖 Rahul")
 st.write(answer)
