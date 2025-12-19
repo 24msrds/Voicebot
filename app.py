@@ -1,4 +1,4 @@
-# app.py — Rahul AI Bot (GPT-style NLP Assistant)
+# app.py — Rahul AI Bot (General Technical AI Assistant)
 
 import streamlit as st
 import requests
@@ -17,12 +17,12 @@ except Exception:
 # --------------------------
 # UI CONFIG
 # --------------------------
-st.set_page_config(page_title="Rahul AI Bot", layout="centered")
-st.title("🧠 Rahul AI Bot")
-st.write("Voice + Text AI assistant for NLP tasks (GPT-style)")
+st.set_page_config(page_title="Rahul AI", layout="centered")
+st.title("🤖 Rahul AI")
+st.write("Ask any technical question. I can help with AI, ML, DL, NLP, Data Science, Algorithms, and more.")
 
 # --------------------------
-# SESSION MEMORY (GPT CONTEXT)
+# SESSION MEMORY (GPT-style)
 # --------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -48,65 +48,45 @@ if Groq is None:
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 # --------------------------
-# NLP TASK SELECTOR
+# SYSTEM PROMPT (CORE INTELLIGENCE)
 # --------------------------
-task = st.selectbox(
-    "🛠 Select NLP Task",
-    [
-        "General Chat / Text Generation",
-        "Text Summarization",
-        "Sentiment Analysis",
-        "Grammar Correction",
-        "Text Rewriting",
-        "Keyword Extraction",
-        "Explain in Simple Terms"
-    ]
-)
+SYSTEM_PROMPT = {
+    "role": "system",
+    "content": """
+You are Rahul, a highly intelligent technical AI assistant.
 
-# --------------------------
-# CREATIVITY CONTROL
-# --------------------------
-temperature = st.slider("🎨 Creativity", 0.1, 1.2, 0.7)
+Identity:
+- Your name is Rahul.
+- If asked who you are, always reply: "My name is Rahul."
+
+Capabilities:
+- Artificial Intelligence
+- Machine Learning
+- Deep Learning
+- Natural Language Processing
+- Data Science
+- Algorithms
+- Statistics
+- Programming
+
+Rules:
+- Automatically infer the domain of the question.
+- Answer clearly, step by step.
+- Use technical depth when required.
+- Never mention LLaMA, Groq, or model names.
+- Never say you are an AI model by any company.
+"""
+}
+
+# Ensure system prompt is first message
+if not st.session_state.messages:
+    st.session_state.messages.append(SYSTEM_PROMPT)
 
 # --------------------------
 # INPUT (VOICE + TEXT)
 # --------------------------
 audio = st.audio_input("🎙️ Speak")
-text_input = st.text_area("✍️ Or type text")
-
-# --------------------------
-# PROMPT ENGINE (GPT CORE)
-# --------------------------
-def build_prompt(task, text):
-    if task == "General Chat / Text Generation":
-        return text
-
-    if task == "Text Summarization":
-        return f"Summarize the following text clearly:\n{text}"
-
-    if task == "Sentiment Analysis":
-        return f"""
-Analyze the sentiment of the text.
-Return:
-- Sentiment (Positive / Negative / Neutral)
-- Confidence %
-- Short explanation
-
-Text:
-{text}
-"""
-
-    if task == "Grammar Correction":
-        return f"Correct grammar and improve clarity:\n{text}"
-
-    if task == "Text Rewriting":
-        return f"Rewrite the text in a professional way:\n{text}"
-
-    if task == "Keyword Extraction":
-        return f"Extract key important words:\n{text}"
-
-    if task == "Explain in Simple Terms":
-        return f"Explain this in very simple terms:\n{text}"
+text_input = st.text_area("✍️ Or type your question")
 
 # --------------------------
 # DEEPGRAM SPEECH → TEXT (SAME)
@@ -144,12 +124,10 @@ st.markdown("### 🧑 You")
 st.write(user_text)
 
 # --------------------------
-# BUILD GPT MESSAGE
+# ADD USER MESSAGE
 # --------------------------
-prompt = build_prompt(task, user_text)
-
 st.session_state.messages.append(
-    {"role": "user", "content": prompt}
+    {"role": "user", "content": user_text}
 )
 
 # --------------------------
@@ -159,8 +137,7 @@ try:
     response = groq_client.chat.completions.create(
         model=MODEL_ID,
         messages=st.session_state.messages,
-        temperature=temperature,
-        max_tokens=600
+        max_tokens=700
     )
     answer = response.choices[0].message.content
 except Exception:
@@ -175,7 +152,7 @@ st.session_state.messages.append(
 # --------------------------
 # OUTPUT
 # --------------------------
-st.markdown("### 🤖 Rahul AI Bot")
+st.markdown("### 🤖 Rahul")
 st.write(answer)
 
 # --------------------------
@@ -195,9 +172,9 @@ if st.checkbox("🔊 Read aloud", value=True):
         st.audio(tts_response.content, format="audio/mp3")
 
 # --------------------------
-# CONVERSATION MEMORY VIEW
+# MEMORY VIEW (OPTIONAL)
 # --------------------------
-with st.expander("📝 Conversation Memory"):
+with st.expander("🧠 Conversation Memory"):
     for msg in st.session_state.messages:
-        role = "You" if msg["role"] == "user" else "Rahul AI"
+        role = "You" if msg["role"] == "user" else "Rahul"
         st.markdown(f"**{role}:** {msg['content']}")
