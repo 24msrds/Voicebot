@@ -1,4 +1,4 @@
-# app.py — Rahul AI (General Technical AI Assistant)
+# app.py — Rahul AI (Duplicate-safe GPT-style assistant)
 
 import streamlit as st
 import requests
@@ -7,7 +7,7 @@ import tempfile
 import traceback
 
 # --------------------------
-# Lazy Groq import (SAME)
+# Lazy Groq import
 # --------------------------
 try:
     from groq import Groq
@@ -18,20 +18,26 @@ except Exception:
 # UI CONFIG
 # --------------------------
 st.set_page_config(page_title="Rahul AI", layout="centered")
-st.title("🤖 Rahul AI")
-st.write("Ask any technical question. I can help with AI, ML, DL, NLP, Data Science, Algorithms, and Programming.")
+st.title(" Rahul AI")
+st.write(
+    "Ask any technical question. I can help with AI, ML, DL, NLP, "
+    "Data Science, Algorithms, and Programming."
+)
 
 # --------------------------
-# SESSION MEMORY (GPT-style)
+# SESSION STATE INIT
 # --------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+if "last_input" not in st.session_state:
+    st.session_state.last_input = None
+
 # --------------------------
-# SECRETS CHECK (SAME)
+# SECRETS CHECK
 # --------------------------
 if "GROQ_API_KEY" not in st.secrets or "DEEPGRAM_API_KEY" not in st.secrets:
-    st.error("Missing GROQ_API_KEY or DEEPGRAM_API_KEY in Streamlit secrets.")
+    st.error("Missing GROQ_API_KEY or DEEPGRAM_API_KEY.")
     st.stop()
 
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
@@ -39,7 +45,7 @@ DEEPGRAM_API_KEY = st.secrets["DEEPGRAM_API_KEY"]
 MODEL_ID = st.secrets.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 # --------------------------
-# INIT GROQ CLIENT (SAME)
+# INIT GROQ CLIENT
 # --------------------------
 if Groq is None:
     st.error("Groq SDK not installed. Run: pip install groq")
@@ -67,33 +73,30 @@ Capabilities:
 - Data Science
 - Algorithms
 - Statistics
-- Programming (Python, Java, C, SQL)
+- Programming
 
 Rules:
 - Automatically infer the technical domain.
-- Explain concepts step by step.
-- Use examples when helpful.
-- Be precise and professional.
-- Never mention LLaMA, Groq, or model names.
-- Never say you are an AI model by any company.
+- Explain concepts clearly and step by step.
+- Use examples where helpful.
+- Never mention model names, Groq, or LLaMA.
 """
 }
 
-# Ensure system prompt is first
 if not st.session_state.messages:
     st.session_state.messages.append(SYSTEM_PROMPT)
 
 # --------------------------
-# INPUT (VOICE + TEXT)
+# INPUT UI
 # --------------------------
 audio = st.audio_input("🎙️ Speak")
 
 with st.form(key="text_form", clear_on_submit=True):
-    text_input = st.text_input("✍️ Or type your question")
+    text_input = st.text_input(" Or type your question")
     submitted = st.form_submit_button("Send")
 
 # --------------------------
-# DEEPGRAM SPEECH → TEXT (SAME)
+# DEEPGRAM STT
 # --------------------------
 def deepgram_transcribe(audio_file):
     url = "https://api.deepgram.com/v1/listen"
@@ -106,9 +109,9 @@ def deepgram_transcribe(audio_file):
     return data["results"]["channels"][0]["alternatives"][0]["transcript"]
 
 # --------------------------
-# GET USER TEXT
+# GET USER INPUT (SAFE)
 # --------------------------
-user_text = ""
+user_text = None
 
 if audio:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp:
@@ -121,24 +124,26 @@ if audio:
 elif submitted and text_input.strip():
     user_text = text_input.strip()
 
-if not user_text:
+# --------------------------
+# DUPLICATE PREVENTION
+# --------------------------
+if not user_text or user_text == st.session_state.last_input:
     st.stop()
 
-# --------------------------
-# DISPLAY USER INPUT
-# --------------------------
-st.markdown("### 🧑 You")
-st.write(user_text)
+st.session_state.last_input = user_text
 
 # --------------------------
-# ADD USER MESSAGE
+# DISPLAY USER MESSAGE
 # --------------------------
+st.markdown("###  You")
+st.write(user_text)
+
 st.session_state.messages.append(
     {"role": "user", "content": user_text}
 )
 
 # --------------------------
-# GROQ CHAT COMPLETION (SAME)
+# GROQ COMPLETION
 # --------------------------
 try:
     response = groq_client.chat.completions.create(
@@ -148,7 +153,7 @@ try:
     )
     answer = response.choices[0].message.content
 except Exception:
-    st.error("Groq API Error")
+    st.error("Groq API error")
     st.text(traceback.format_exc())
     st.stop()
 
@@ -159,13 +164,13 @@ st.session_state.messages.append(
 # --------------------------
 # DISPLAY ANSWER
 # --------------------------
-st.markdown("### 🤖 Rahul")
+st.markdown("###  Rahul")
 st.write(answer)
 
 # --------------------------
-# DEEPGRAM TEXT → SPEECH (SAME)
+# DEEPGRAM TTS
 # --------------------------
-if st.checkbox("🔊 Read aloud", value=True):
+if st.checkbox(" Read aloud", value=True):
     tts_url = "https://api.deepgram.com/v1/speak?model=aura-asteria-en"
     tts_response = requests.post(
         tts_url,
@@ -179,9 +184,9 @@ if st.checkbox("🔊 Read aloud", value=True):
         st.audio(tts_response.content, format="audio/mp3")
 
 # --------------------------
-# MEMORY VIEW (OPTIONAL)
+# MEMORY VIEW
 # --------------------------
-with st.expander("🧠 Conversation Memory"):
+with st.expander(" Conversation Memory"):
     for msg in st.session_state.messages:
         role = "You" if msg["role"] == "user" else "Rahul"
         st.markdown(f"**{role}:** {msg['content']}")
