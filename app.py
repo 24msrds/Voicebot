@@ -50,12 +50,8 @@ if not st.session_state.messages:
 # SHOW CHAT HISTORY
 # --------------------------
 for msg in st.session_state.messages:
-    if msg["role"] == "user":
-        with st.chat_message("user"):
-            st.write(msg["content"])
-    elif msg["role"] == "assistant":
-        with st.chat_message("assistant"):
-            st.write(msg["content"])
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
 
 # --------------------------
 # INTENT DETECTION
@@ -82,7 +78,7 @@ def summarize_memory(messages):
         if m["role"] != "system"
     )
 
-    response = groq_client.chat.completions.create(
+    r = groq_client.chat.completions.create(
         model=MODEL_ID,
         messages=[
             {"role": "system", "content": "Summarize briefly for memory."},
@@ -90,7 +86,7 @@ def summarize_memory(messages):
         ],
         max_tokens=120
     )
-    return response.choices[0].message.content
+    return r.choices[0].message.content
 
 # --------------------------
 # DEEPGRAM STT
@@ -107,18 +103,35 @@ def deepgram_transcribe(audio_bytes):
     return data["results"]["channels"][0]["alternatives"][0]["transcript"]
 
 # --------------------------
-# DEEPGRAM TTS (INDIAN-FRIENDLY MALE)
+# DEEPGRAM TTS (INDIAN MALE + CHUNK SAFE)
 # --------------------------
 def deepgram_tts(text):
-    url = "https://api.deepgram.com/v1/speak?model=aura-asteria-en"
+    url = "https://api.deepgram.com/v1/speak?model=aura-orion-en"
     headers = {
         "Authorization": f"Token {DEEPGRAM_API_KEY}",
         "Content-Type": "application/json"
     }
-    payload = {"text": text}
-    r = requests.post(url, headers=headers, json=payload)
-    r.raise_for_status()
-    return r.content
+
+    def split_text(txt, max_len=700):
+        chunks = []
+        while len(txt) > max_len:
+            split_at = txt.rfind(" ", 0, max_len)
+            if split_at == -1:
+                split_at = max_len
+            chunks.append(txt[:split_at])
+            txt = txt[split_at:].strip()
+        chunks.append(txt)
+        return chunks
+
+    audio_bytes = b""
+
+    for chunk in split_text(text):
+        payload = {"text": chunk}
+        r = requests.post(url, headers=headers, json=payload)
+        r.raise_for_status()
+        audio_bytes += r.content
+
+    return audio_bytes
 
 # --------------------------
 # AUDIO INPUT
@@ -149,7 +162,7 @@ if not user_text:
     st.stop()
 
 # --------------------------
-# ADD USER MESSAGE
+# USER MESSAGE
 # --------------------------
 intent = detect_intent(user_text)
 
@@ -175,12 +188,12 @@ if len(st.session_state.messages) > 12:
 # GROQ RESPONSE
 # --------------------------
 try:
-    response = groq_client.chat.completions.create(
+    r = groq_client.chat.completions.create(
         model=MODEL_ID,
         messages=st.session_state.messages,
         max_tokens=700
     )
-    answer = response.choices[0].message.content
+    answer = r.choices[0].message.content
 except Exception:
     st.error("LLM error")
     st.text(traceback.format_exc())
@@ -194,7 +207,7 @@ with st.chat_message("assistant"):
     st.write(answer)
 
 # --------------------------
-# READ ALOUD (FREE, STABLE)
+# READ ALOUD
 # --------------------------
 if st.checkbox("Read aloud", value=True):
     try:
@@ -202,3 +215,4 @@ if st.checkbox("Read aloud", value=True):
         st.audio(audio_bytes, format="audio/mp3")
     except Exception:
         st.warning("TTS failed")
+        st.text(traceback.format_exc())
