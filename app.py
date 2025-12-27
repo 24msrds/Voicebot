@@ -1,10 +1,11 @@
-# app.py — Rahul AI (Mic + Type BOTH WORK, Stable)
+# app.py — Rahul AI (FINAL, STABLE)
 
 import streamlit as st
 import requests
 import json
 import tempfile
 import traceback
+import base64
 
 try:
     from groq import Groq
@@ -30,16 +31,24 @@ if "audio_processed" not in st.session_state:
 # --------------------------
 # SECRETS
 # --------------------------
-if "GROQ_API_KEY" not in st.secrets or "DEEPGRAM_API_KEY" not in st.secrets:
-    st.error("Missing API keys")
+if (
+    "GROQ_API_KEY" not in st.secrets
+    or "DEEPGRAM_API_KEY" not in st.secrets
+    or "ELEVENLABS_API_KEY" not in st.secrets
+    or "ELEVENLABS_VOICE_ID" not in st.secrets
+):
+    st.error("Missing API keys. Please check Streamlit Secrets.")
     st.stop()
 
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 DEEPGRAM_API_KEY = st.secrets["DEEPGRAM_API_KEY"]
+ELEVENLABS_API_KEY = st.secrets["ELEVENLABS_API_KEY"]
+ELEVENLABS_VOICE_ID = st.secrets["ELEVENLABS_VOICE_ID"]
+
 MODEL_ID = st.secrets.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 if Groq is None:
-    st.error("Groq SDK missing")
+    st.error("Groq SDK not installed")
     st.stop()
 
 groq_client = Groq(api_key=GROQ_API_KEY)
@@ -49,12 +58,12 @@ groq_client = Groq(api_key=GROQ_API_KEY)
 # --------------------------
 SYSTEM_PROMPT = {
     "role": "system",
-    "content": """
-You are Rahul, a highly intelligent technical assistant.
-Your name is Rahul.
-If asked who you are, reply exactly: My name is Rahul.
-Never mention model names or providers.
-"""
+    "content": (
+        "You are Rahul, a highly intelligent technical assistant. "
+        "Your name is Rahul. "
+        "If asked who you are, reply exactly: My name is Rahul. "
+        "Never mention model names or providers."
+    )
 }
 
 if not st.session_state.messages:
@@ -81,11 +90,37 @@ def deepgram_transcribe(audio_file):
         "Content-Type": "audio/webm"
     }
     response = requests.post(url, headers=headers, data=audio_file)
+    response.raise_for_status()
     data = response.json()
     return data["results"]["channels"][0]["alternatives"][0]["transcript"]
 
 # --------------------------
-# AUDIO INPUT (ISOLATED)
+# INWORLD / ELEVENLABS TTS
+# --------------------------
+def inworld_tts(text):
+    url = "https://api.inworld.ai/tts/v1/voice"
+    headers = {
+        "Authorization": f"Basic {ELEVENLABS_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "text": text,
+        "voice_id": ELEVENLABS_VOICE_ID,
+        "audio_config": {
+            "audio_encoding": "MP3",
+            "speaking_rate": 1
+        },
+        "temperature": 1.1,
+        "model_id": "inworld-tts-1-max"
+    }
+
+    response = requests.post(url, json=payload, headers=headers)
+    response.raise_for_status()
+    audio_base64 = response.json()["audioContent"]
+    return base64.b64decode(audio_base64)
+
+# --------------------------
+# AUDIO INPUT
 # --------------------------
 audio = st.audio_input("Speak your question")
 
@@ -102,7 +137,7 @@ if audio and not st.session_state.audio_processed:
     st.session_state.audio_processed = True
 
 # --------------------------
-# TEXT INPUT (CHAT)
+# TEXT INPUT
 # --------------------------
 typed_text = st.chat_input("Type your question and press Enter")
 
@@ -149,17 +184,12 @@ with st.chat_message("assistant"):
     st.write(answer)
 
 # --------------------------
-# DEEPGRAM TTS
+# READ ALOUD (YOUR VOICE)
 # --------------------------
 if st.checkbox("Read aloud", value=True):
-    tts_url = "https://api.deepgram.com/v1/speak?model=aura-asteria-en"
-    tts_response = requests.post(
-        tts_url,
-        headers={
-            "Authorization": f"Token {DEEPGRAM_API_KEY}",
-            "Content-Type": "application/json"
-        },
-        data=json.dumps({"text": answer})
-    )
-    if tts_response.status_code == 200:
-        st.audio(tts_response.content, format="audio/mp3")
+    try:
+        audio_bytes = inworld_tts(answer)
+        st.audio(audio_bytes, format="audio/mp3")
+    except Exception:
+        st.error("TTS failed")
+        st.text(traceback.format_exc())
