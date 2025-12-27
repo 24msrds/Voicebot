@@ -1,4 +1,4 @@
-# app.py — Rahul AI (FINAL, STABLE)
+# app.py — Rahul AI (FINAL WORKING VERSION)
 
 import streamlit as st
 import requests
@@ -31,14 +31,17 @@ if "audio_processed" not in st.session_state:
 # --------------------------
 # SECRETS
 # --------------------------
-if (
-    "GROQ_API_KEY" not in st.secrets
-    or "DEEPGRAM_API_KEY" not in st.secrets
-    or "ELEVENLABS_API_KEY" not in st.secrets
-    or "ELEVENLABS_VOICE_ID" not in st.secrets
-):
-    st.error("Missing API keys. Please check Streamlit Secrets.")
-    st.stop()
+required_keys = [
+    "GROQ_API_KEY",
+    "DEEPGRAM_API_KEY",
+    "ELEVENLABS_API_KEY",
+    "ELEVENLABS_VOICE_ID",
+]
+
+for key in required_keys:
+    if key not in st.secrets:
+        st.error(f"Missing secret: {key}")
+        st.stop()
 
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 DEEPGRAM_API_KEY = st.secrets["DEEPGRAM_API_KEY"]
@@ -47,6 +50,9 @@ ELEVENLABS_VOICE_ID = st.secrets["ELEVENLABS_VOICE_ID"]
 
 MODEL_ID = st.secrets.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 
+# --------------------------
+# INIT GROQ
+# --------------------------
 if Groq is None:
     st.error("Groq SDK not installed")
     st.stop()
@@ -70,7 +76,7 @@ if not st.session_state.messages:
     st.session_state.messages.append(SYSTEM_PROMPT)
 
 # --------------------------
-# SHOW CHAT HISTORY
+# DISPLAY CHAT HISTORY
 # --------------------------
 for msg in st.session_state.messages:
     if msg["role"] == "user":
@@ -95,23 +101,23 @@ def deepgram_transcribe(audio_file):
     return data["results"]["channels"][0]["alternatives"][0]["transcript"]
 
 # --------------------------
-# INWORLD / ELEVENLABS TTS
+# INWORLD / ELEVENLABS TTS (JWT → BEARER)
 # --------------------------
 def inworld_tts(text):
     url = "https://api.inworld.ai/tts/v1/voice"
     headers = {
-        "Authorization": f"Basic {ELEVENLABS_API_KEY}",
+        "Authorization": f"Bearer {ELEVENLABS_API_KEY}",
         "Content-Type": "application/json"
     }
     payload = {
         "text": text,
         "voice_id": ELEVENLABS_VOICE_ID,
+        "model_id": "inworld-tts-1-max",
         "audio_config": {
             "audio_encoding": "MP3",
             "speaking_rate": 1
         },
-        "temperature": 1.1,
-        "model_id": "inworld-tts-1-max"
+        "temperature": 1.1
     }
 
     response = requests.post(url, json=payload, headers=headers)
@@ -146,7 +152,7 @@ if typed_text:
     st.session_state.audio_processed = False
 
 # --------------------------
-# STOP IF NOTHING NEW
+# STOP IF NO INPUT
 # --------------------------
 if not user_text:
     st.stop()
@@ -184,7 +190,7 @@ with st.chat_message("assistant"):
     st.write(answer)
 
 # --------------------------
-# READ ALOUD (YOUR VOICE)
+# READ ALOUD (YOUR CLONED VOICE)
 # --------------------------
 if st.checkbox("Read aloud", value=True):
     try:
