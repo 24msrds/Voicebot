@@ -1,11 +1,10 @@
-# app.py — Rahul AI (Intent Detection + Voice, FINAL)
+# app.py — Rahul AI (Deepgram STT + TTS, Intent-Aware)
 
 import streamlit as st
 import requests
 import json
 import tempfile
 import traceback
-
 from groq import Groq
 
 # --------------------------
@@ -27,29 +26,18 @@ if "audio_processed" not in st.session_state:
 # --------------------------
 # SECRETS
 # --------------------------
-required_keys = [
-    "GROQ_API_KEY",
-    "DEEPGRAM_API_KEY",
-    "ELEVENLABS_API_KEY",
-    "ELEVENLABS_VOICE_ID",
-]
-
-for key in required_keys:
-    if key not in st.secrets:
-        st.error(f"Missing secret: {key}")
-        st.stop()
+if "GROQ_API_KEY" not in st.secrets or "DEEPGRAM_API_KEY" not in st.secrets:
+    st.error("Missing API keys")
+    st.stop()
 
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 DEEPGRAM_API_KEY = st.secrets["DEEPGRAM_API_KEY"]
-ELEVENLABS_API_KEY = st.secrets["ELEVENLABS_API_KEY"]
-ELEVENLABS_VOICE_ID = st.secrets["ELEVENLABS_VOICE_ID"]
-
 MODEL_ID = st.secrets.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 # --------------------------
-# SYSTEM PROMPT (BASE IDENTITY)
+# SYSTEM PROMPT
 # --------------------------
 BASE_SYSTEM_PROMPT = (
     "You are Rahul, a highly intelligent AI assistant. "
@@ -74,63 +62,51 @@ def deepgram_transcribe(audio_file):
         "Authorization": f"Token {DEEPGRAM_API_KEY}",
         "Content-Type": "audio/webm",
     }
-    response = requests.post(url, headers=headers, data=audio_file)
-    response.raise_for_status()
-    return response.json()["results"]["channels"][0]["alternatives"][0]["transcript"]
+    r = requests.post(url, headers=headers, data=audio_file)
+    r.raise_for_status()
+    return r.json()["results"]["channels"][0]["alternatives"][0]["transcript"]
 
 # --------------------------
-# ELEVENLABS TTS (TRAINED / INDIAN VOICE)
+# DEEPGRAM TTS (FREE)
 # --------------------------
-def elevenlabs_tts(text):
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
+def deepgram_tts(text):
+    url = "https://api.deepgram.com/v1/speak?model=aura-asteria-en"
     headers = {
-        "xi-api-key": ELEVENLABS_API_KEY,
+        "Authorization": f"Token {DEEPGRAM_API_KEY}",
         "Content-Type": "application/json",
     }
-    payload = {
-        "text": text,
-        "model_id": "eleven_multilingual_v2",
-        "voice_settings": {
-            "stability": 0.6,
-            "similarity_boost": 0.7,
-        },
-    }
-    response = requests.post(url, json=payload, headers=headers)
-    response.raise_for_status()
-    return response.content
+    payload = {"text": text}
+    r = requests.post(url, headers=headers, data=json.dumps(payload))
+    r.raise_for_status()
+    return r.content
 
 # --------------------------
 # INTENT DETECTION (MINIMAL)
 # --------------------------
 def detect_intent(user_text):
     prompt = (
-        "Classify the user question into ONE of these intents:\n"
+        "Classify the user question into ONE intent:\n"
         "explanation, how_to, comparison, coding, calculation, general.\n\n"
         f"Question: \"{user_text}\"\n\n"
         "Reply with ONLY the intent."
     )
 
     try:
-        response = groq_client.chat.completions.create(
+        r = groq_client.chat.completions.create(
             model=MODEL_ID,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=10,
         )
-        intent = response.choices[0].message.content.strip().lower()
-        allowed = {
-            "explanation",
-            "how_to",
-            "comparison",
-            "coding",
-            "calculation",
-            "general",
-        }
-        return intent if intent in allowed else "general"
+        intent = r.choices[0].message.content.strip().lower()
+        return intent if intent in {
+            "explanation", "how_to", "comparison",
+            "coding", "calculation", "general"
+        } else "general"
     except Exception:
         return "general"
 
 # --------------------------
-# AUDIO INPUT (MIC)
+# AUDIO INPUT
 # --------------------------
 audio = st.audio_input("Speak your question")
 user_text = None
@@ -158,7 +134,7 @@ if not user_text:
     st.stop()
 
 # --------------------------
-# DISPLAY USER MESSAGE
+# USER MESSAGE
 # --------------------------
 st.session_state.messages.append({"role": "user", "content": user_text})
 with st.chat_message("user"):
@@ -169,52 +145,40 @@ with st.chat_message("user"):
 # --------------------------
 intent = detect_intent(user_text)
 
-guided_system_prompt = {
+system_prompt = {
     "role": "system",
     "content": (
         f"{BASE_SYSTEM_PROMPT}\n\n"
         f"The user's intent is: {intent}.\n"
-        "Respond as follows:\n"
-        "- explanation: clear, structured explanation\n"
-        "- how_to: step-by-step guidance\n"
-        "- comparison: concise comparison (table or bullets)\n"
-        "- coding: correct code with brief explanation\n"
-        "- calculation: short, direct answer\n"
-        "- general: normal helpful response\n"
-        "Never mention intent explicitly."
+        "Answer accordingly and clearly."
     ),
 }
 
-messages = [
-    guided_system_prompt,
-    {"role": "user", "content": user_text},
-]
+messages = [system_prompt, {"role": "user", "content": user_text}]
 
 try:
-    response = groq_client.chat.completions.create(
+    r = groq_client.chat.completions.create(
         model=MODEL_ID,
         messages=messages,
         max_tokens=700,
     )
-    answer = response.choices[0].message.content
+    answer = r.choices[0].message.content
 except Exception:
     st.error("LLM error")
     st.text(traceback.format_exc())
     st.stop()
 
 st.session_state.messages.append({"role": "assistant", "content": answer})
-
 with st.chat_message("assistant"):
     st.write(answer)
 
 # --------------------------
-# READ ALOUD (OPTIONAL)
+# READ ALOUD
 # --------------------------
 if st.checkbox("Read aloud", value=True):
     try:
-        audio_bytes = elevenlabs_tts(answer)
+        audio_bytes = deepgram_tts(answer)
         st.audio(audio_bytes, format="audio/mp3")
     except Exception:
         st.error("TTS failed")
         st.text(traceback.format_exc())
-
