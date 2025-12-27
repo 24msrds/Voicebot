@@ -1,5 +1,3 @@
-# app.py — Rahul AI (Deepgram STT + TTS, Intent-Aware)
-
 import streamlit as st
 import requests
 import json
@@ -8,11 +6,11 @@ import traceback
 from groq import Groq
 
 # --------------------------
-# UI
+# PAGE CONFIG
 # --------------------------
 st.set_page_config(page_title="Rahul AI", layout="centered")
 st.title("Rahul AI")
-st.write("Ask any question using voice or text.")
+st.write("Ask any technical question using voice or text.")
 
 # --------------------------
 # SESSION STATE
@@ -26,84 +24,101 @@ if "audio_processed" not in st.session_state:
 # --------------------------
 # SECRETS
 # --------------------------
-if "GROQ_API_KEY" not in st.secrets or "DEEPGRAM_API_KEY" not in st.secrets:
-    st.error("Missing API keys")
-    st.stop()
-
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 DEEPGRAM_API_KEY = st.secrets["DEEPGRAM_API_KEY"]
-MODEL_ID = st.secrets.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+MODEL_ID = st.secrets.get("GROQ_MODEL")
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 # --------------------------
 # SYSTEM PROMPT
 # --------------------------
-BASE_SYSTEM_PROMPT = (
-    "You are Rahul, a highly intelligent AI assistant. "
-    "Your name is Rahul. "
-    "If asked who you are, reply exactly: My name is Rahul. "
-    "Never mention model names or providers."
-)
+SYSTEM_PROMPT = {
+    "role": "system",
+    "content": (
+        "You are Rahul, a highly intelligent technical assistant. "
+        "Your name is Rahul. "
+        "If asked who you are, reply exactly: My name is Rahul. "
+        "Never mention model names or providers."
+    )
+}
+
+if not st.session_state.messages:
+    st.session_state.messages.append(SYSTEM_PROMPT)
 
 # --------------------------
 # SHOW CHAT HISTORY
 # --------------------------
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.write(msg["content"])
+    if msg["role"] == "user":
+        with st.chat_message("user"):
+            st.write(msg["content"])
+    elif msg["role"] == "assistant":
+        with st.chat_message("assistant"):
+            st.write(msg["content"])
+
+# --------------------------
+# INTENT DETECTION
+# --------------------------
+def detect_intent(text):
+    text = text.lower()
+    if any(w in text for w in ["how", "steps", "procedure", "workflow"]):
+        return "step_by_step"
+    if any(w in text for w in ["define", "what is", "meaning"]):
+        return "definition"
+    if any(w in text for w in ["code", "error", "bug", "exception"]):
+        return "code_help"
+    if any(w in text for w in ["explain", "describe", "elaborate"]):
+        return "technical_explanation"
+    return "general_chat"
+
+# --------------------------
+# MEMORY SUMMARIZATION
+# --------------------------
+def summarize_memory(messages):
+    convo = "\n".join(
+        f"{m['role']}: {m['content']}"
+        for m in messages[-8:]
+        if m["role"] != "system"
+    )
+
+    response = groq_client.chat.completions.create(
+        model=MODEL_ID,
+        messages=[
+            {"role": "system", "content": "Summarize briefly for memory."},
+            {"role": "user", "content": convo}
+        ],
+        max_tokens=120
+    )
+    return response.choices[0].message.content
 
 # --------------------------
 # DEEPGRAM STT
 # --------------------------
-def deepgram_transcribe(audio_file):
+def deepgram_transcribe(audio_bytes):
     url = "https://api.deepgram.com/v1/listen"
     headers = {
         "Authorization": f"Token {DEEPGRAM_API_KEY}",
-        "Content-Type": "audio/webm",
+        "Content-Type": "audio/webm"
     }
-    r = requests.post(url, headers=headers, data=audio_file)
+    r = requests.post(url, headers=headers, data=audio_bytes)
     r.raise_for_status()
-    return r.json()["results"]["channels"][0]["alternatives"][0]["transcript"]
+    data = r.json()
+    return data["results"]["channels"][0]["alternatives"][0]["transcript"]
 
 # --------------------------
-# DEEPGRAM TTS (FREE)
+# DEEPGRAM TTS (INDIAN-FRIENDLY MALE)
 # --------------------------
 def deepgram_tts(text):
     url = "https://api.deepgram.com/v1/speak?model=aura-asteria-en"
     headers = {
         "Authorization": f"Token {DEEPGRAM_API_KEY}",
-        "Content-Type": "application/json",
+        "Content-Type": "application/json"
     }
     payload = {"text": text}
-    r = requests.post(url, headers=headers, data=json.dumps(payload))
+    r = requests.post(url, headers=headers, json=payload)
     r.raise_for_status()
     return r.content
-
-# --------------------------
-# INTENT DETECTION (MINIMAL)
-# --------------------------
-def detect_intent(user_text):
-    prompt = (
-        "Classify the user question into ONE intent:\n"
-        "explanation, how_to, comparison, coding, calculation, general.\n\n"
-        f"Question: \"{user_text}\"\n\n"
-        "Reply with ONLY the intent."
-    )
-
-    try:
-        r = groq_client.chat.completions.create(
-            model=MODEL_ID,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=10,
-        )
-        intent = r.choices[0].message.content.strip().lower()
-        return intent if intent in {
-            "explanation", "how_to", "comparison",
-            "coding", "calculation", "general"
-        } else "general"
-    except Exception:
-        return "general"
 
 # --------------------------
 # AUDIO INPUT
@@ -117,7 +132,7 @@ if audio and not st.session_state.audio_processed:
         audio_path = tmp.name
 
     with open(audio_path, "rb") as f:
-        user_text = deepgram_transcribe(f)
+        user_text = deepgram_transcribe(f.read())
 
     st.session_state.audio_processed = True
 
@@ -134,51 +149,56 @@ if not user_text:
     st.stop()
 
 # --------------------------
-# USER MESSAGE
+# ADD USER MESSAGE
 # --------------------------
-st.session_state.messages.append({"role": "user", "content": user_text})
+intent = detect_intent(user_text)
+
+st.session_state.messages.append({
+    "role": "user",
+    "content": f"[Intent: {intent}] {user_text}"
+})
+
 with st.chat_message("user"):
     st.write(user_text)
 
 # --------------------------
-# INTENT-AWARE RESPONSE
+# MEMORY COMPRESSION
 # --------------------------
-intent = detect_intent(user_text)
+if len(st.session_state.messages) > 12:
+    memory = summarize_memory(st.session_state.messages)
+    st.session_state.messages = [
+        SYSTEM_PROMPT,
+        {"role": "system", "content": f"Conversation memory: {memory}"}
+    ]
 
-system_prompt = {
-    "role": "system",
-    "content": (
-        f"{BASE_SYSTEM_PROMPT}\n\n"
-        f"The user's intent is: {intent}.\n"
-        "Answer accordingly and clearly."
-    ),
-}
-
-messages = [system_prompt, {"role": "user", "content": user_text}]
-
+# --------------------------
+# GROQ RESPONSE
+# --------------------------
 try:
-    r = groq_client.chat.completions.create(
+    response = groq_client.chat.completions.create(
         model=MODEL_ID,
-        messages=messages,
-        max_tokens=700,
+        messages=st.session_state.messages,
+        max_tokens=700
     )
-    answer = r.choices[0].message.content
+    answer = response.choices[0].message.content
 except Exception:
     st.error("LLM error")
     st.text(traceback.format_exc())
     st.stop()
 
-st.session_state.messages.append({"role": "assistant", "content": answer})
+st.session_state.messages.append(
+    {"role": "assistant", "content": answer}
+)
+
 with st.chat_message("assistant"):
     st.write(answer)
 
 # --------------------------
-# READ ALOUD
+# READ ALOUD (FREE, STABLE)
 # --------------------------
 if st.checkbox("Read aloud", value=True):
     try:
         audio_bytes = deepgram_tts(answer)
         st.audio(audio_bytes, format="audio/mp3")
     except Exception:
-        st.error("TTS failed")
-        st.text(traceback.format_exc())
+        st.warning("TTS failed")
