@@ -1,11 +1,10 @@
-# app.py — Rahul AI (FINAL WORKING VERSION)
+# app.py — Rahul AI (FINAL STABLE VERSION)
 
 import streamlit as st
 import requests
 import json
 import tempfile
 import traceback
-import base64
 
 try:
     from groq import Groq
@@ -35,7 +34,7 @@ required_keys = [
     "GROQ_API_KEY",
     "DEEPGRAM_API_KEY",
     "ELEVENLABS_API_KEY",
-    "ELEVENLABS_VOICE_ID",
+    "ELEVENLABS_VOICE_ID"
 ]
 
 for key in required_keys:
@@ -87,7 +86,7 @@ for msg in st.session_state.messages:
             st.write(msg["content"])
 
 # --------------------------
-# DEEPGRAM STT
+# DEEPGRAM STT (VOICE INPUT)
 # --------------------------
 def deepgram_transcribe(audio_file):
     url = "https://api.deepgram.com/v1/listen"
@@ -101,32 +100,29 @@ def deepgram_transcribe(audio_file):
     return data["results"]["channels"][0]["alternatives"][0]["transcript"]
 
 # --------------------------
-# INWORLD / ELEVENLABS TTS (JWT → BEARER)
+# ELEVENLABS CLASSIC TTS (VOICE OUTPUT)
 # --------------------------
-def inworld_tts(text):
-    url = "https://api.inworld.ai/tts/v1/voice"
+def elevenlabs_tts(text):
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
     headers = {
-        "Authorization": f"Bearer {ELEVENLABS_API_KEY}",
+        "xi-api-key": ELEVENLABS_API_KEY,
         "Content-Type": "application/json"
     }
     payload = {
         "text": text,
-        "voice_id": ELEVENLABS_VOICE_ID,
-        "model_id": "inworld-tts-1-max",
-        "audio_config": {
-            "audio_encoding": "MP3",
-            "speaking_rate": 1
-        },
-        "temperature": 1.1
+        "model_id": "eleven_multilingual_v2",
+        "voice_settings": {
+            "stability": 0.6,
+            "similarity_boost": 0.7
+        }
     }
 
     response = requests.post(url, json=payload, headers=headers)
     response.raise_for_status()
-    audio_base64 = response.json()["audioContent"]
-    return base64.b64decode(audio_base64)
+    return response.content  # raw MP3 bytes
 
 # --------------------------
-# AUDIO INPUT
+# AUDIO INPUT (MIC)
 # --------------------------
 audio = st.audio_input("Speak your question")
 
@@ -190,11 +186,11 @@ with st.chat_message("assistant"):
     st.write(answer)
 
 # --------------------------
-# READ ALOUD (YOUR CLONED VOICE)
+# READ ALOUD (YOUR VOICE)
 # --------------------------
 if st.checkbox("Read aloud", value=True):
     try:
-        audio_bytes = inworld_tts(answer)
+        audio_bytes = elevenlabs_tts(answer)
         st.audio(audio_bytes, format="audio/mp3")
     except Exception:
         st.error("TTS failed")
