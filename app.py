@@ -4,13 +4,9 @@ import tempfile
 import traceback
 import os
 import json
+import base64
 from groq import Groq
-
-# IMAGE / OCR IMPORTS
 from PIL import Image
-import pytesseract
-import cv2
-import numpy as np
 
 # --------------------------
 # PAGE CONFIG
@@ -33,8 +29,8 @@ if "messages" not in st.session_state:
 if "audio_processed" not in st.session_state:
     st.session_state.audio_processed = False
 
-if "image_text" not in st.session_state:
-    st.session_state.image_text = None
+if "image_b64" not in st.session_state:
+    st.session_state.image_b64 = None
 
 if "persistent_memory" not in st.session_state:
     if os.path.exists(MEMORY_FILE):
@@ -64,8 +60,7 @@ def should_remember(text):
         "i am", "i'm", "my project", "working on",
         "i prefer", "remember", "my goal", "my aim"
     ]
-    t = text.lower()
-    return any(k in t for k in keywords)
+    return any(k in text.lower() for k in keywords)
 
 # --------------------------
 # SYSTEM PROMPT (HIDDEN)
@@ -90,7 +85,7 @@ if not st.session_state.messages:
 # --------------------------
 # SIDEBAR MEMORY CONTROL
 # --------------------------
-st.sidebar.markdown("### 🧠 Rahul Memory")
+st.sidebar.markdown("### Rahul Memory")
 if st.sidebar.button("Clear Memory"):
     st.session_state.persistent_memory = []
     save_memory()
@@ -106,44 +101,24 @@ for msg in st.session_state.messages:
         st.write(msg["content"])
 
 # --------------------------
-# INTENT DETECTION
+# IMAGE → BASE64
 # --------------------------
-def detect_intent(text):
-    t = text.lower()
-    if any(w in t for w in ["calculate", "+", "-", "*", "/"]):
-        return "calculator"
-    if any(w in t for w in ["print", "for", "while", "range"]):
-        return "code"
-    return "chat"
+def image_to_base64(image):
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+        image.save(tmp.name)
+        with open(tmp.name, "rb") as f:
+            return base64.b64encode(f.read()).decode()
 
 # --------------------------
-# TOOLS
+# IMAGE UPLOAD
 # --------------------------
-def calculator(expr):
-    try:
-        allowed = "0123456789+-*/(). "
-        if not all(c in allowed for c in expr):
-            return "Invalid characters."
-        return f"Result: {eval(expr)}"
-    except Exception as e:
-        return f"Calculation error: {e}"
+st.markdown("### Upload Image (certificate, diagram, screenshot)")
+uploaded_image = st.file_uploader("Upload image", type=["png", "jpg", "jpeg"])
 
-def run_python(code):
-    try:
-        safe_globals = {
-            "__builtins__": {
-                "print": print,
-                "range": range,
-                "len": len,
-                "sum": sum,
-                "min": min,
-                "max": max
-            }
-        }
-        exec(code, safe_globals, {})
-        return "Code executed successfully."
-    except Exception as e:
-        return f"Code error: {e}"
+if uploaded_image:
+    image = Image.open(uploaded_image)
+    st.image(image, use_column_width=True)
+    st.session_state.image_b64 = image_to_base64(image)
 
 # --------------------------
 # DEEPGRAM STT
@@ -168,42 +143,13 @@ def deepgram_tts(text):
         "Content-Type": "application/json"
     }
 
-    def split_text(t, n=700):
-        out = []
-        while len(t) > n:
-            i = t.rfind(" ", 0, n)
-            if i == -1:
-                i = n
-            out.append(t[:i])
-            t = t[i:].strip()
-        out.append(t)
-        return out
-
     audio = b""
-    for chunk in split_text(text):
+    for i in range(0, len(text), 600):
+        chunk = text[i:i+600]
         r = requests.post(url, headers=headers, json={"text": chunk})
         r.raise_for_status()
         audio += r.content
     return audio
-
-# --------------------------
-# IMAGE OCR
-# --------------------------
-def extract_text_from_image(image):
-    img = np.array(image)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    return pytesseract.image_to_string(gray).strip()
-
-# --------------------------
-# IMAGE UPLOAD
-# --------------------------
-st.markdown("### 🖼️ Upload Image")
-uploaded_image = st.file_uploader("Upload image", type=["png", "jpg", "jpeg"])
-
-if uploaded_image:
-    image = Image.open(uploaded_image)
-    st.image(image, use_column_width=True)
-    st.session_state.image_text = extract_text_from_image(image)
 
 # --------------------------
 # AUDIO INPUT
@@ -245,34 +191,37 @@ with st.chat_message("user"):
     st.write(user_text)
 
 # --------------------------
-# RESPONSE
+# IMAGE-AWARE RESPONSE
 # --------------------------
-if st.session_state.image_text:
-    prompt = (
-        "Explain the following image:\n\n"
-        f"{st.session_state.image_text}\n\n"
-        f"User question: {user_text}"
-    )
+if st.session_state.image_b64:
     r = groq_client.chat.completions.create(
         model=MODEL_ID,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Explain this image clearly and professionally."},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{st.session_state.image_b64}"
+                        }
+                    }
+                ]
+            }
+        ],
         max_tokens=700
     )
     answer = r.choices[0].message.content
-    st.session_state.image_text = None
+    st.session_state.image_b64 = None
+
 else:
-    intent = detect_intent(user_text)
-    if intent == "calculator":
-        answer = calculator(user_text.replace("calculate", "").strip())
-    elif intent == "code":
-        answer = run_python(user_text)
-    else:
-        r = groq_client.chat.completions.create(
-            model=MODEL_ID,
-            messages=st.session_state.messages,
-            max_tokens=700
-        )
-        answer = r.choices[0].message.content
+    r = groq_client.chat.completions.create(
+        model=MODEL_ID,
+        messages=st.session_state.messages,
+        max_tokens=700
+    )
+    answer = r.choices[0].message.content
 
 # --------------------------
 # ASSISTANT MESSAGE
