@@ -1,4 +1,6 @@
 import streamlit as st
+import requests
+import tempfile
 import traceback
 from groq import Groq
 
@@ -7,13 +9,14 @@ from groq import Groq
 # --------------------------
 st.set_page_config(page_title="Rahul AI", layout="centered")
 st.title("Rahul AI")
-st.write("Ask any technical question using text.")
+st.write("Ask any technical question using text or voice.")
 
 # --------------------------
-# SECRETS (STRICT)
+# SECRETS
 # --------------------------
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-MODEL_ID = "llama-3.3-70b-versatile"  # FIXED
+DEEPGRAM_API_KEY = st.secrets["DEEPGRAM_API_KEY"]
+MODEL_ID = "llama-3.3-70b-versatile"
 
 client = Groq(api_key=GROQ_API_KEY)
 
@@ -36,12 +39,15 @@ SYSTEM_PROMPT = {
 if "messages" not in st.session_state:
     st.session_state.messages = [SYSTEM_PROMPT]
 
-# --------------------------
-# SIDEBAR CONTROLS
-# --------------------------
-st.sidebar.markdown("### 🧠 Controls")
+if "audio_used" not in st.session_state:
+    st.session_state.audio_used = False
 
-if st.sidebar.button("🗑️ Clear Conversation"):
+# --------------------------
+# SIDEBAR
+# --------------------------
+st.sidebar.markdown("### Controls")
+
+if st.sidebar.button(" Clear Conversation"):
     st.session_state.messages = [SYSTEM_PROMPT]
     st.sidebar.success("Conversation cleared")
 
@@ -61,43 +67,100 @@ def detect_intent(text):
     t = text.lower()
     if any(x in t for x in ["calculate", "+", "-", "*", "/", "%"]):
         return "calculator"
-    if any(x in t for x in ["code", "python", "java", "c++", "sql", "program"]):
+    if any(x in t for x in ["code", "python", "java", "sql", "program"]):
         return "code"
     return "chat"
 
 # --------------------------
-# CALCULATOR (SAFE)
+# CALCULATOR
 # --------------------------
 def calculator(expr):
     try:
         expr = expr.replace("calculate", "").strip()
         allowed = "0123456789+-*/(). %"
         if not all(c in allowed for c in expr):
-            return "❌ Invalid characters in expression."
-        return f"✅ Result: {eval(expr)}"
+            return "Invalid characters."
+        return f"Result: {eval(expr)}"
     except Exception as e:
-        return f"❌ Calculation error: {e}"
+        return f"Calculation error: {e}"
 
 # --------------------------
-# USER INPUT
+# DEEPGRAM STT
 # --------------------------
-user_text = st.chat_input("Type your question and press Enter")
+def deepgram_transcribe(audio_bytes):
+    url = "https://api.deepgram.com/v1/listen"
+    headers = {
+        "Authorization": f"Token {DEEPGRAM_API_KEY}",
+        "Content-Type": "audio/webm"
+    }
+    r = requests.post(url, headers=headers, data=audio_bytes)
+    r.raise_for_status()
+    return r.json()["results"]["channels"][0]["alternatives"][0]["transcript"]
+
+# --------------------------
+# DEEPGRAM TTS (INDIAN-FRIENDLY MALE)
+# --------------------------
+def deepgram_tts(text):
+    url = "https://api.deepgram.com/v1/speak?model=aura-orion-en"
+    headers = {
+        "Authorization": f"Token {DEEPGRAM_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    def split_text(t, n=700):
+        chunks = []
+        while len(t) > n:
+            i = t.rfind(" ", 0, n)
+            if i == -1:
+                i = n
+            chunks.append(t[:i])
+            t = t[i:].strip()
+        chunks.append(t)
+        return chunks
+
+    audio = b""
+    for chunk in split_text(text):
+        r = requests.post(url, headers=headers, json={"text": chunk})
+        r.raise_for_status()
+        audio += r.content
+
+    return audio
+
+# --------------------------
+# AUDIO INPUT
+# --------------------------
+audio = st.audio_input("Speak your question")
+user_text = None
+
+if audio and not st.session_state.audio_used:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp:
+        tmp.write(audio.read())
+    with open(tmp.name, "rb") as f:
+        user_text = deepgram_transcribe(f.read())
+    st.session_state.audio_used = True
+
+# --------------------------
+# TEXT INPUT
+# --------------------------
+typed_text = st.chat_input("Type your question and press Enter")
+
+if typed_text:
+    user_text = typed_text
+    st.session_state.audio_used = False
 
 if not user_text:
     st.stop()
 
 # --------------------------
-# ADD USER MESSAGE
+# USER MESSAGE
 # --------------------------
-st.session_state.messages.append(
-    {"role": "user", "content": user_text}
-)
+st.session_state.messages.append({"role": "user", "content": user_text})
 
 with st.chat_message("user"):
     st.write(user_text)
 
 # --------------------------
-# ROUTING LOGIC
+# RESPONSE
 # --------------------------
 intent = detect_intent(user_text)
 
@@ -106,30 +169,23 @@ try:
         answer = calculator(user_text)
 
     elif intent == "code":
-        response = client.chat.completions.create(
+        r = client.chat.completions.create(
             model=MODEL_ID,
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a senior software engineer. "
-                        "Return clean, correct, well-formatted code only. "
-                        "Add brief comments where necessary."
-                    )
-                },
+                {"role": "system", "content": "Return clean, correct code only."},
                 {"role": "user", "content": user_text}
             ],
             max_tokens=600
         )
-        answer = response.choices[0].message.content
+        answer = r.choices[0].message.content
 
     else:
-        response = client.chat.completions.create(
+        r = client.chat.completions.create(
             model=MODEL_ID,
-            messages=st.session_state.messages[-6:],  # safe context window
+            messages=st.session_state.messages[-6:],
             max_tokens=500
         )
-        answer = response.choices[0].message.content
+        answer = r.choices[0].message.content
 
 except Exception:
     st.error("Groq API Error")
@@ -139,9 +195,21 @@ except Exception:
 # --------------------------
 # ASSISTANT MESSAGE
 # --------------------------
-st.session_state.messages.append(
-    {"role": "assistant", "content": answer}
-)
+st.session_state.messages.append({"role": "assistant", "content": answer})
 
 with st.chat_message("assistant"):
     st.write(answer)
+
+# --------------------------
+# READ ALOUD
+# --------------------------
+if st.checkbox("Read aloud", value=True):
+    try:
+        st.audio(deepgram_tts(answer), format="audio/mp3")
+    except Exception:
+        st.warning("TTS failed")
+
+# --------------------------
+# RESET
+# --------------------------
+st.session_state.audio_used = False
