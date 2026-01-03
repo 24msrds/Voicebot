@@ -31,7 +31,7 @@ MODEL_ID = st.secrets.get("GROQ_MODEL")
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 # --------------------------
-# SYSTEM PROMPT
+# SYSTEM PROMPT (HIDDEN)
 # --------------------------
 SYSTEM_PROMPT = {
     "role": "system",
@@ -47,9 +47,12 @@ if not st.session_state.messages:
     st.session_state.messages.append(SYSTEM_PROMPT)
 
 # --------------------------
-# SHOW CHAT HISTORY
+# SHOW CHAT HISTORY (HIDE SYSTEM)
 # --------------------------
 for msg in st.session_state.messages:
+    if msg["role"] == "system":
+        continue  # 🔴 DO NOT DISPLAY SYSTEM PROMPT
+
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
@@ -103,7 +106,7 @@ def deepgram_transcribe(audio_bytes):
     return data["results"]["channels"][0]["alternatives"][0]["transcript"]
 
 # --------------------------
-# DEEPGRAM TTS (INDIAN MALE + CHUNK SAFE)
+# DEEPGRAM TTS (CHUNK SAFE)
 # --------------------------
 def deepgram_tts(text):
     url = "https://api.deepgram.com/v1/speak?model=aura-orion-en"
@@ -159,6 +162,7 @@ if typed_text:
     st.session_state.audio_processed = False
 
 if not user_text:
+    st.session_state.audio_processed = False
     st.stop()
 
 # --------------------------
@@ -168,7 +172,7 @@ intent = detect_intent(user_text)
 
 st.session_state.messages.append({
     "role": "user",
-    "content": f"[Intent: {intent}] {user_text}"
+    "content": user_text
 })
 
 with st.chat_message("user"):
@@ -215,4 +219,8 @@ if st.checkbox("Read aloud", value=True):
         st.audio(audio_bytes, format="audio/mp3")
     except Exception:
         st.warning("TTS failed")
-        st.text(traceback.format_exc())
+
+# --------------------------
+# RESET FOR NEXT TURN
+# --------------------------
+st.session_state.audio_processed = False
