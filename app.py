@@ -1,6 +1,5 @@
 import streamlit as st
 import requests
-import json
 import tempfile
 import traceback
 from groq import Groq
@@ -51,8 +50,7 @@ if not st.session_state.messages:
 # --------------------------
 for msg in st.session_state.messages:
     if msg["role"] == "system":
-        continue  # 🔴 DO NOT DISPLAY SYSTEM PROMPT
-
+        continue
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
@@ -60,36 +58,49 @@ for msg in st.session_state.messages:
 # INTENT DETECTION
 # --------------------------
 def detect_intent(text):
-    text = text.lower()
-    if any(w in text for w in ["how", "steps", "procedure", "workflow"]):
+    t = text.lower()
+    if any(w in t for w in ["calculate", "+", "-", "*", "/"]):
+        return "calculator"
+    if any(w in t for w in ["print", "for", "while", "range"]):
+        return "code"
+    if any(w in t for w in ["how", "steps", "procedure"]):
         return "step_by_step"
-    if any(w in text for w in ["define", "what is", "meaning"]):
+    if any(w in t for w in ["define", "what is", "meaning"]):
         return "definition"
-    if any(w in text for w in ["code", "error", "bug", "exception"]):
-        return "code_help"
-    if any(w in text for w in ["explain", "describe", "elaborate"]):
-        return "technical_explanation"
     return "general_chat"
 
 # --------------------------
-# MEMORY SUMMARIZATION
+# TOOL: CALCULATOR
 # --------------------------
-def summarize_memory(messages):
-    convo = "\n".join(
-        f"{m['role']}: {m['content']}"
-        for m in messages[-8:]
-        if m["role"] != "system"
-    )
+def calculator(expr):
+    try:
+        allowed = "0123456789+-*/(). "
+        if not all(c in allowed for c in expr):
+            return "Invalid characters in expression."
+        return f"Result: {eval(expr)}"
+    except Exception as e:
+        return f"Calculation error: {e}"
 
-    r = groq_client.chat.completions.create(
-        model=MODEL_ID,
-        messages=[
-            {"role": "system", "content": "Summarize briefly for memory."},
-            {"role": "user", "content": convo}
-        ],
-        max_tokens=120
-    )
-    return r.choices[0].message.content
+# --------------------------
+# TOOL: SAFE PYTHON EXECUTION
+# --------------------------
+def run_python(code):
+    try:
+        safe_globals = {
+            "__builtins__": {
+                "print": print,
+                "range": range,
+                "len": len,
+                "sum": sum,
+                "min": min,
+                "max": max
+            }
+        }
+        safe_locals = {}
+        exec(code, safe_globals, safe_locals)
+        return "Code executed successfully."
+    except Exception as e:
+        return f"Code execution error: {e}"
 
 # --------------------------
 # DEEPGRAM STT
@@ -102,8 +113,7 @@ def deepgram_transcribe(audio_bytes):
     }
     r = requests.post(url, headers=headers, data=audio_bytes)
     r.raise_for_status()
-    data = r.json()
-    return data["results"]["channels"][0]["alternatives"][0]["transcript"]
+    return r.json()["results"]["channels"][0]["alternatives"][0]["transcript"]
 
 # --------------------------
 # DEEPGRAM TTS (CHUNK SAFE)
@@ -115,26 +125,23 @@ def deepgram_tts(text):
         "Content-Type": "application/json"
     }
 
-    def split_text(txt, max_len=700):
-        chunks = []
-        while len(txt) > max_len:
-            split_at = txt.rfind(" ", 0, max_len)
-            if split_at == -1:
-                split_at = max_len
-            chunks.append(txt[:split_at])
-            txt = txt[split_at:].strip()
-        chunks.append(txt)
-        return chunks
+    def split_text(t, n=700):
+        out = []
+        while len(t) > n:
+            i = t.rfind(" ", 0, n)
+            if i == -1:
+                i = n
+            out.append(t[:i])
+            t = t[i:].strip()
+        out.append(t)
+        return out
 
-    audio_bytes = b""
-
+    audio = b""
     for chunk in split_text(text):
-        payload = {"text": chunk}
-        r = requests.post(url, headers=headers, json=payload)
+        r = requests.post(url, headers=headers, json={"text": chunk})
         r.raise_for_status()
-        audio_bytes += r.content
-
-    return audio_bytes
+        audio += r.content
+    return audio
 
 # --------------------------
 # AUDIO INPUT
@@ -145,18 +152,14 @@ user_text = None
 if audio and not st.session_state.audio_processed:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp:
         tmp.write(audio.read())
-        audio_path = tmp.name
-
-    with open(audio_path, "rb") as f:
+    with open(tmp.name, "rb") as f:
         user_text = deepgram_transcribe(f.read())
-
     st.session_state.audio_processed = True
 
 # --------------------------
 # TEXT INPUT
 # --------------------------
 typed_text = st.chat_input("Type your question and press Enter")
-
 if typed_text:
     user_text = typed_text
     st.session_state.audio_processed = False
@@ -169,43 +172,37 @@ if not user_text:
 # USER MESSAGE
 # --------------------------
 intent = detect_intent(user_text)
-
-st.session_state.messages.append({
-    "role": "user",
-    "content": user_text
-})
+st.session_state.messages.append({"role": "user", "content": user_text})
 
 with st.chat_message("user"):
     st.write(user_text)
 
 # --------------------------
-# MEMORY COMPRESSION
+# TOOL ROUTING
 # --------------------------
-if len(st.session_state.messages) > 12:
-    memory = summarize_memory(st.session_state.messages)
-    st.session_state.messages = [
-        SYSTEM_PROMPT,
-        {"role": "system", "content": f"Conversation memory: {memory}"}
-    ]
+if intent == "calculator":
+    answer = calculator(user_text.replace("calculate", "").strip())
+
+elif intent == "code":
+    answer = run_python(user_text)
+
+else:
+    try:
+        r = groq_client.chat.completions.create(
+            model=MODEL_ID,
+            messages=st.session_state.messages,
+            max_tokens=700
+        )
+        answer = r.choices[0].message.content
+    except Exception:
+        st.error("LLM error")
+        st.text(traceback.format_exc())
+        st.stop()
 
 # --------------------------
-# GROQ RESPONSE
+# ASSISTANT MESSAGE
 # --------------------------
-try:
-    r = groq_client.chat.completions.create(
-        model=MODEL_ID,
-        messages=st.session_state.messages,
-        max_tokens=700
-    )
-    answer = r.choices[0].message.content
-except Exception:
-    st.error("LLM error")
-    st.text(traceback.format_exc())
-    st.stop()
-
-st.session_state.messages.append(
-    {"role": "assistant", "content": answer}
-)
+st.session_state.messages.append({"role": "assistant", "content": answer})
 
 with st.chat_message("assistant"):
     st.write(answer)
@@ -215,12 +212,11 @@ with st.chat_message("assistant"):
 # --------------------------
 if st.checkbox("Read aloud", value=True):
     try:
-        audio_bytes = deepgram_tts(answer)
-        st.audio(audio_bytes, format="audio/mp3")
+        st.audio(deepgram_tts(answer), format="audio/mp3")
     except Exception:
         st.warning("TTS failed")
 
 # --------------------------
-# RESET FOR NEXT TURN
+# RESET
 # --------------------------
 st.session_state.audio_processed = False
