@@ -1,3 +1,9 @@
 streamlit
 requests
 groq
+pillow
+pytesseract
+opencv-python-headless
+numpy
+
+
